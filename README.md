@@ -4,5 +4,5 @@ You can run `python VAE_struct.py` to reproduce the single domain single modalit
 
 # Related papers
 
-`Deep Variational and Structural Hashing`
+`Deep Variational and Structural Hashing`<br>
 `Learning Efficient Convolutional Networks through Network Slimming`
