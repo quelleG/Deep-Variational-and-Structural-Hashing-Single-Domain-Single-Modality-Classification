@@ -18,7 +18,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
-from torch.autograd import Variable
 #from torchvision.datasets import MNIST
 #from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter       
@@ -108,8 +107,9 @@ class VAE(nn.Module):
 
     def reparametrize(self, mu, logvar):
         z = torch.randn(mu.size(0), mu.size(1))
-        eps = Variable(z, requires_grad=True).cuda()  
-        return mu + eps * torch.exp(logvar/2)
+        if torch.cuda.is_available():
+            z = z.cuda()  
+        return mu + z * torch.exp(logvar/2)
     
     
     def forward(self, x):
@@ -239,7 +239,7 @@ def main():
     
     model = VAE()
     
-    if args.cuda:
+    if args.cuda and torch.cuda.is_available():
         model.cuda()
     
     optimizer = optim.SGD(model.parameters(), 
@@ -247,18 +247,18 @@ def main():
                           weight_decay=args.weight_decay)
 #    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     
-    if args.resume:
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint '{}'".format(args.resume))
-            checkpoint = torch.load(args.resume)
-            args.start_epoch = checkpoint['epoch']
-            best_prec1 = checkpoint['best_prec1']
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (epoch {}) Prec1: {:f}"
-                  .format(args.resume, checkpoint['epoch'], best_prec1))
-        else:
-            print("=> no checkpoint found at '{}'".format(args.resume)) 
+#    if args.resume:
+#        if os.path.isfile(args.resume):
+#            print("=> loading checkpoint '{}'".format(args.resume))
+#            checkpoint = torch.load(args.resume)
+#            args.start_epoch = checkpoint['epoch']
+#            best_prec1 = checkpoint['best_prec1']
+#            model.load_state_dict(checkpoint['state_dict'])
+#            optimizer.load_state_dict(checkpoint['optimizer'])
+#            print("=> loaded checkpoint '{}' (epoch {}) Prec1: {:f}"
+#                  .format(args.resume, checkpoint['epoch'], best_prec1))
+#        else:
+#            print("=> no checkpoint found at '{}'".format(args.resume)) 
     
     # additional subgradient descent on the sparsity-induced penalty term
 #    def updateBN():
@@ -269,19 +269,20 @@ def main():
 #                m.weight.grad.data.add_(args.s*torch.sign(m.weight.data)) # L1
 
     def BKloss(output, target, mu, logvar):
-        criterion  = nn.CrossEntropyLoss().cuda()
+        criterion = nn.CrossEntropyLoss()
+        if torch.cuda.is_available():
+            criterion = criterion.cuda()
         BCE = criterion(output, target)
         
-        KLD_element=mu.pow(2).add_(logvar.exp()).mul_(-1).add_(1).add_(logvar)
-        KLD = Variable(torch.sum(KLD_element).mul_(-0.5), requires_grad=True)
+        KLD = torch.sum(mu.pow(2).add_(logvar.exp()).mul_(-1).add_(1).add_(logvar)).mul_(-0.5)
         return BCE + args.eta * KLD
      
 
     def train(epoch):
         model.train()
         for batch_idx, (data, target) in enumerate(train_loader):
-            data, target = Variable(data), Variable(target)
-            data, target = data.cuda(), target.cuda()
+            if torch.cuda.is_available():
+                data, target = data.cuda(), target.cuda()
             optimizer.zero_grad()
             output, mu, logvar = model(data) 
             loss = BKloss(output, target, mu, logvar)
@@ -302,7 +303,8 @@ def main():
         test_loss = 0
         correct = 0
         for data, target in test_loader:
-            data, target = data.cuda(), target.cuda()
+            if torch.cuda.is_available():
+                data, target = data.cuda(), target.cuda()
             output, mu, logvar = model(data) 
             loss = BKloss(output, target, mu, logvar)
             test_loss += float(loss)
@@ -332,7 +334,8 @@ def main():
     writer = SummaryWriter('runs/VAE2')
     best_prec1 = 0.
 #    dummy_input = torch.rand(20, 3, 32, 32)
-#    dummy_input = dummy_input.cuda()
+#    if torch.cuda.is_available():
+#        dummy_input = dummy_input.cuda()
 #    writer.add_graph(model, (dummy_input,))
 #    writer.flush()
     for epoch in range(args.start_epoch, args.epochs):
