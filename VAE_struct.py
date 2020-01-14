@@ -26,41 +26,33 @@ from torch.utils.tensorboard import SummaryWriter
 defaultcfg = {
     4 : [ 32, 'M', 32, 'M', 64],
 }
-struct_length = 36
-struct_group_num = 5
 
 class VAE(nn.Module):
     def __init__(self, dataset='cifar10', depth=4, init_weights=True, 
-                 cfg=None):
+                 cfg=None, struct_length=4, struct_group_num=36):
         super(VAE, self).__init__()
         if cfg is None:
             cfg = defaultcfg[depth]
         if dataset == 'cifar10':
             num_classes = 10
 
-        self.feature = self.make_layers(cfg, True)
+        self.feature = self.make_feature_layers(cfg, True)
 
         self.encoder = nn.Sequential(
               nn.Linear(4096, 500), 
               nn.BatchNorm1d(500),
-              nn.ReLU(inplace=True),
-            )
+              nn.ReLU(inplace=True))
             
         self.fc_logvar = nn.Sequential(
               nn.Linear(500, 500),
               nn.BatchNorm1d(500),
-              nn.ReLU(inplace=True),
-            )
+              nn.ReLU(inplace=True))
         
         self.fc_mu = nn.Sequential(
               nn.Linear(500, 500),
               nn.BatchNorm1d(500),
-              nn.ReLU(inplace=True),
-            )
+              nn.ReLU(inplace=True))
         
-        self.classifier = nn.Linear(struct_length * struct_group_num, 
-                                    num_classes)
-
         self.struct_layer_before = nn.Sequential(
                 nn.Linear(500, 500), 
                 nn.BatchNorm1d(500), 
@@ -69,34 +61,22 @@ class VAE(nn.Module):
                 nn.BatchNorm1d(300), 
                 nn.ReLU(inplace=True))
         
-        self.struct_1 = nn.Sequential(
-                nn.Linear(300, struct_length), 
-                nn.BatchNorm1d(struct_length),  
-                nn.ReLU(inplace=True))
+        self.struct = []
+        for i in range(struct_group_num):
+            self.struct.append(self.make_struct_layer(struct_length))
         
-        self.struct_2 = nn.Sequential(
-                nn.Linear(300, struct_length), 
-                nn.BatchNorm1d(struct_length),  
-                nn.ReLU(inplace=True))
-        
-        self.struct_3 = nn.Sequential(
-                nn.Linear(300, struct_length), 
-                nn.BatchNorm1d(struct_length),  
-                nn.ReLU(inplace=True))
-        
-        self.struct_4 = nn.Sequential(
-                nn.Linear(300, struct_length), 
-                nn.BatchNorm1d(struct_length),  
-                nn.ReLU(inplace=True))
-        
-        self.struct_5 = nn.Sequential(
-                nn.Linear(300, struct_length), 
-                nn.BatchNorm1d(struct_length),  
-                nn.ReLU(inplace=True))
+        self.classifier = nn.Linear(struct_length * struct_group_num, 
+                                    num_classes)
 
         if init_weights:
             self._initialize_weights()
             
+            
+    def make_struct_layer(self, length):
+        layers = [nn.Linear(300, length), nn.BatchNorm1d(length), 
+                  nn.ReLU(inplace=True)]
+        return nn.Sequential(*layers)
+
 
     def encode(self, x):
         x = x.view(x.size(0), -1)
@@ -116,13 +96,16 @@ class VAE(nn.Module):
         x = self.feature(x)
         x, mu, logvar = self.encode(x) 
         x = self.struct_layer_before(x)
-        x = torch.cat([self.struct_1(x), self.struct_2(x), self.struct_3(x), 
-                       self.struct_4(x), self.struct_5(x)], dim=1)
-        y = torch.sigmoid(self.classifier(x))
+        t = []
+        for ti in self.struct:
+            t.append(ti(x))
+        
+        hash_raw = torch.cat(t, dim=1)
+        y = torch.sigmoid(self.classifier(hash_raw))
         return y, mu, logvar
     
     
-    def make_layers(self, cfg, batch_norm=True):
+    def make_feature_layers(self, cfg, batch_norm=True):
         layers = []
         in_channels = 3
         for v in cfg:
@@ -138,22 +121,6 @@ class VAE(nn.Module):
                     layers += [conv2d, nn.ReLU(inplace=True)]
                 in_channels = v
         return nn.Sequential(*layers)
-    
-    
-#    def make_struct(self, struct_length, struct_group_num, batch_norm=True):
-#        layers = []
-#        struct_block = []
-#        
-#        struct_block += [nn.Linear(300, struct_length)]
-#        if batch_norm:
-#            struct_block += [nn.BatchNorm1d(struct_length),  
-#                             nn.ReLU(inplace=True)]
-#        else:
-#            struct_block += [nn.ReLU(inplace=True)]
-#        
-#        for i in range(struct_group_num):
-#            layers += struct_block
-#        return nn.Sequential(*layers)
 
 
     def _initialize_weights(self):
@@ -181,6 +148,10 @@ def main():
 #                        help='train with channel sparsity regularization')
 #    parser.add_argument('--s', type=float, default=0.0001,
 #                        help='scale sparse rate (default: 0.0001)')
+    parser.add_argument('--struct-length', type=int, default=4, metavar='N',
+                    help='the length of struct block (default: 4)')
+    parser.add_argument('--struct-group-num', type=int, default=36, metavar='N',
+                    help='the num of struct block group (default: 36)')
     parser.add_argument('--eta', type=float, default=0.000001,
                         help='Loss = BCE + eta * KLD (eta default: 0.000001)') 
     parser.add_argument('--batch-size', type=int, default=128, metavar='N',
@@ -227,17 +198,23 @@ def main():
                            transforms.RandomCrop(32),
                            transforms.RandomHorizontalFlip(),
                            transforms.ToTensor(),
-                           transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+                           transforms.Normalize((0.4914, 0.4822, 0.4465), 
+                                                (0.2023, 0.1994, 0.2010))
                        ])),
         batch_size=args.batch_size, shuffle=True, **kwargs)
     test_loader = torch.utils.data.DataLoader(
-        datasets.CIFAR10('./data.cifar10', train=False, transform=transforms.Compose([
+        datasets.CIFAR10('./data.cifar10', train=False, 
+                           transform=transforms.Compose([
                            transforms.ToTensor(),
-                           transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+                           transforms.Normalize((0.4914, 0.4822, 0.4465), 
+                                                (0.2023, 0.1994, 0.2010))
                        ])),
         batch_size=args.test_batch_size, shuffle=True, **kwargs)
-    
-    model = VAE()
+         
+               
+    model = VAE(dataset='cifar10', depth=args.depth, init_weights=True, 
+                 cfg=None, struct_length=args.struct_length, 
+                 struct_group_num=args.struct_group_num)
     
     if args.cuda and torch.cuda.is_available():
         model.cuda()
@@ -245,7 +222,8 @@ def main():
     optimizer = optim.SGD(model.parameters(), 
                           lr=args.lr, momentum=args.momentum, 
                           weight_decay=args.weight_decay)
-#    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+#    optimizer = optim.Adam(model.parameters(), lr=args.lr, 
+#                           weight_decay=args.weight_decay)
     
 #    if args.resume:
 #        if os.path.isfile(args.resume):
@@ -261,12 +239,12 @@ def main():
 #            print("=> no checkpoint found at '{}'".format(args.resume)) 
     
     # additional subgradient descent on the sparsity-induced penalty term
-#    def updateBN():
-#        for m in model.modules():
-#            if isinstance(m, nn.BatchNorm2d):
-#                m.weight.grad.data.add_(args.s*torch.sign(m.weight.data)) # L1
-#            if isinstance(m, nn.BatchNorm1d):
-#                m.weight.grad.data.add_(args.s*torch.sign(m.weight.data)) # L1
+    def updateBN():
+        for m in model.modules():
+            if isinstance(m, nn.BatchNorm2d):
+                m.weight.grad.data.add_(args.s*torch.sign(m.weight.data)) # L1
+            if isinstance(m, nn.BatchNorm1d):
+                m.weight.grad.data.add_(args.s*torch.sign(m.weight.data)) # L1
 
     def BKloss(output, target, mu, logvar):
         criterion = nn.CrossEntropyLoss()
