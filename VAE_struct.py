@@ -20,7 +20,8 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 #from torchvision.datasets import MNIST
 #from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter       
+from torch.utils.tensorboard import SummaryWriter     
+# import easydict
 
 
 defaultcfg = {
@@ -66,7 +67,7 @@ class VAE(nn.Module):
             self.struct.append(self.make_struct_layer(struct_length))
         
         self.classifier = nn.Linear(struct_length * struct_group_num, 
-                                    num_classes)
+                                    num_classes).cuda()
 
         if init_weights:
             self._initialize_weights()
@@ -75,7 +76,7 @@ class VAE(nn.Module):
     def make_struct_layer(self, length):
         layers = [nn.Linear(300, length), nn.BatchNorm1d(length), 
                   nn.ReLU(inplace=True)]
-        return nn.Sequential(*layers)
+        return nn.Sequential(*layers).cuda()
 
 
     def encode(self, x):
@@ -180,6 +181,25 @@ def main():
                         help='depth of the feature network')
     
     args = parser.parse_args()
+#     args = easydict.EasyDict({
+#         "struct_length": 44,
+#         "struct_group_num": 36,
+#         "eta": 0.000001,
+#         "batch_size": 128,
+#         "test_batch_size": 256,
+#         "epochs": 160,
+#         "start_epoch": 0,
+#         "lr": 0.1,
+#         "momentum": 0.9,
+#         "weight_decay": 1e-4,
+#         "no_cuda": False,
+#         "seed": 1,
+#         "log_interval": 100,
+#         "save": './logs',
+#         "depth": 4
+#     })
+           
+           
     args.cuda = True  #not args.no_cuda and torch.cuda.is_available()
     
     torch.manual_seed(args.seed)
@@ -325,12 +345,14 @@ def main():
         prec1 = test(epoch)
         is_best = prec1 > best_prec1
         best_prec1 = max(prec1, best_prec1)
-        save_checkpoint({
-            'epoch': epoch + 1,
-            'state_dict': model.state_dict(),
-            'best_prec1': best_prec1,
-            'optimizer': optimizer.state_dict(),
-        }, is_best, filepath=args.save)
+           
+        if epoch+1 % 20 == 0:
+                   save_checkpoint({
+                       'epoch': epoch + 1,
+                       'state_dict': model.state_dict(),
+                       'best_prec1': best_prec1,
+                       'optimizer': optimizer.state_dict(),
+                   }, is_best, filepath=args.save)
     
         for i, (name, param) in enumerate(model.named_parameters()):
             if 'bn' not in name:
