@@ -50,7 +50,7 @@ class VAE(nn.Module):
             self.struct.append(self.make_struct_layer(struct_length))
         
         self.classifier = nn.Linear(struct_length * struct_group_num, 
-                                    num_classes)
+                                    num_classes).cuda()
 
         if init_weights:
             self._initialize_weights()
@@ -59,7 +59,7 @@ class VAE(nn.Module):
     def make_struct_layer(self, length):
         layers = [nn.Linear(300, length), nn.BatchNorm1d(length), 
                   nn.ReLU(inplace=True)]
-        return nn.Sequential(*layers)
+        return nn.Sequential(*layers).cuda()
 
 
     def encode(self, x):
