@@ -1,13 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Jan 14 10:55:39 2020
-
-@ Author: ZhangYuan 16051635
-
-@ E-mail:  1441965928@qq.com
-           zydoc@foxmail.com
-
-"""
 import os
 import math
 import argparse
@@ -66,8 +56,12 @@ class VAE(nn.Module):
         for i in range(struct_group_num):
             self.struct.append(self.make_struct_layer(struct_length))
         
-        self.classifier = nn.Linear(struct_length * struct_group_num, 
+        if  torch.cuda.is_available(): #args.cuda and
+            self.classifier = nn.Linear(struct_length * struct_group_num, 
                                     num_classes).cuda()
+        else:
+            self.classifier = nn.Linear(struct_length * struct_group_num, 
+                                    num_classes)
 
         if init_weights:
             self._initialize_weights()
@@ -76,7 +70,10 @@ class VAE(nn.Module):
     def make_struct_layer(self, length):
         layers = [nn.Linear(300, length), nn.BatchNorm1d(length), 
                   nn.ReLU(inplace=True)]
-        return nn.Sequential(*layers).cuda()
+        if  torch.cuda.is_available(): #args.cuda and
+            return nn.Sequential(*layers).cuda()
+        else:
+            return nn.Sequential(*layers)
 
 
     def encode(self, x):
